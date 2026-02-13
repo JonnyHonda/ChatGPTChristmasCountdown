@@ -1,2 +1,3 @@
 # ChatGPTChristmasCountdown
-!00% untested Google Chat CTP Generated Christmas Count down
+100% untested Google Chat GTP Generated Christmas Count down
+
