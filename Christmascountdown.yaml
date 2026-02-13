@@ -4,12 +4,18 @@ esphome:
 esp8266:
   board: nodemcuv2
 
+# Web interface at http://192.168.1.128
 web_server:
   port: 80
 
 wifi:
   ssid: "YOUR_SSID"
   password: "YOUR_PASSWORD"
+  # Optional: Fixed IP setup if your router doesn't reserve it
+  manual_ip:
+    static_ip: 192.168.1.128
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
 
 time:
   - platform: sntp
@@ -18,13 +24,11 @@ time:
     servers:
       - 0.uk.pool.ntp.org
 
-# 1. Add PWM Output for the Buzzer
 output:
   - platform: esp8266_pwm
     pin: GPIO12
     id: buzzer_out
 
-# 2. Add RTTTL Component with Jingle Bells string
 rtttl:
   output: buzzer_out
   id: my_buzzer
@@ -36,6 +40,18 @@ globals:
   - id: holiday_played
     type: bool
     initial_value: 'false'
+
+# Control buttons for the Web Interface
+button:
+  - platform: template
+    name: "Play Jingle Bells"
+    icon: "mdi:music-note"
+    on_press:
+      - rtttl.play: "JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e"
+
+  - platform: restart
+    name: "Reboot Device"
+    icon: "mdi:restart"
 
 switch:
   - platform: template
@@ -94,18 +110,17 @@ display:
         long seconds_remaining = target_epoch - current_epoch;
         id(seconds_left).publish_state(to_string(seconds_remaining));
 
-        // --- BUZZER TRIGGER ---
-        // If countdown hits 0 and we haven't played yet
         if (seconds_remaining == 0 && !id(holiday_played)) {
           id(my_buzzer).play("JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e");
           id(holiday_played) = true;
         } 
-        // Reset the "played" flag once we are 10 seconds past the target
+        
         if (seconds_remaining > 10) {
           id(holiday_played) = false;
         }
 
         if (id(display_toggle).state) {
+          // Automatic BST Night Dimming
           if (now.hour >= 22 || now.hour < 7) {
             it.set_intensity(1); 
           } else {
