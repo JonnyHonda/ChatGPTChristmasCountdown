@@ -4,56 +4,87 @@ esphome:
 esp8266:
   board: nodemcuv2
 
-# Web Server: Access via http://<device_ip> or http://christmas-countdown.local
 web_server:
   port: 80
 
 wifi:
   ssid: "YOUR_SSID"
   password: "YOUR_PASSWORD"
-  fast_connect: true  # Speeds up reconnection by skipping full channel scans
+  fast_connect: true
 
-# Status LED: Blinks during WiFi/NTP sync; remains OFF when system is healthy
-status_led:
-  pin: GPIO2 
+# Signal sensor to monitor connection quality in the Web UI
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    update_interval: 60s
 
-# Time: Automatically handles UK GMT/BST transitions (British Summer Time)
+output:
+  - platform: esp8266_pwm
+    pin: GPIO12
+    id: buzzer_out
+  - platform: gpio
+    pin:
+      number: GPIO2
+      inverted: true # Active-low for most ESP8266 onboard LEDs
+    id: onboard_led
+
+# Global to track blink timing
+globals:
+  - id: last_blink
+    type: uint32_t
+    initial_value: '0'
+
+# Connectivity Monitoring Logic
+interval:
+  - interval: 100ms # High-frequency check to handle fast blinking
+    then:
+      lambda: |-
+        bool wifi_connected = wifi::global_wifi_component->is_connected();
+        bool ntp_synced = id(sntp_time).now().is_valid();
+        uint32_t now_ms = millis();
+
+        if (!wifi_connected) {
+          // FAST BLINK (No WiFi): Toggle every 200ms
+          if (now_ms - id(last_blink) >= 200) {
+            id(onboard_led).toggle();
+            id(last_blink) = now_ms;
+          }
+        } else if (!ntp_synced) {
+          // SLOW BLINK (No NTP): Toggle every 800ms
+          if (now_ms - id(last_blink) >= 800) {
+            id(onboard_led).toggle();
+            id(last_blink) = now_ms;
+          }
+        } else {
+          // SYSTEM HEALTHY: LED OFF
+          id(onboard_led).turn_off();
+        }
+
 time:
   - platform: sntp
     id: sntp_time
     timezone: "GMT0BST,M3.5.0/1,M10.5.0"
     servers:
       - 0.uk.pool.ntp.org
-      - 1.uk.pool.ntp.org
 
-# Audio: PWM output for the piezo buzzer on GPIO12 (D6)
-output:
-  - platform: esp8266_pwm
-    pin: GPIO12
-    id: buzzer_out
-
-# RTTTL: Plays the "Jingle Bells" melody string
 rtttl:
   output: buzzer_out
   id: my_buzzer
 
-# State Management
 globals:
   - id: fake_time_offset
     type: long
-    initial_value: '0'   # Used by Test Mode to jump forward in time
+    initial_value: '0'
   - id: holiday_played
     type: bool
-    initial_value: 'false' # Prevents the buzzer from looping infinitely at 0
+    initial_value: 'false'
 
-# Interactive Web Controls
 button:
   - platform: template
     name: "Play Jingle Bells"
     icon: "mdi:music-note"
     on_press:
       - rtttl.play: "JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e"
-
   - platform: restart
     name: "Reboot Device"
     icon: "mdi:restart"
@@ -64,7 +95,6 @@ switch:
     id: display_toggle
     optimistic: true
     restore_mode: ALWAYS_ON
-
   - platform: template
     name: "Test Mode (100x Speed)"
     id: test_mode
@@ -77,7 +107,6 @@ text_sensor:
     name: "Seconds to Christmas"
     id: seconds_left
 
-# SPI: Hardware bus for the MAX7219
 spi:
   clk_pin: GPIO14
   mosi_pin: GPIO13
@@ -92,65 +121,48 @@ display:
       auto now = id(sntp_time).now();
       
       if (now.is_valid()) {
-        // --- 1. TIME CALCULATION ---
-        // Apply offset if 'Test Mode' is active (adds 1 hour per tick)
         if (id(test_mode).state) {
           id(fake_time_offset) += 3600; 
         }
         
         time_t current_epoch = now.timestamp + id(fake_time_offset);
-        
-        // Break current time down to find the current year
         struct tm target;
         gmtime_r(&current_epoch, &target);
-        
-        // Define target: Dec 25th, 00:00:00 of the current year
-        target.tm_mon = 11;     // December (0-11)
+        target.tm_mon = 11;
         target.tm_mday = 25;
         target.tm_hour = 0;
         target.tm_min = 0;
         target.tm_sec = 0;
-        target.tm_isdst = -1;   // Auto-determine DST for target date
+        target.tm_isdst = -1;
         
         time_t target_epoch = mktime(&target);
         
-        // --- 2. AUTOMATIC ROLLOVER ---
-        // If current time > Dec 25, recalculate for the following year
         if (current_epoch > target_epoch) {
           target.tm_year += 1;
           target_epoch = mktime(&target);
         }
 
         long seconds_remaining = target_epoch - current_epoch;
-        
-        // Sync the live countdown to the web interface
         id(seconds_left).publish_state(to_string(seconds_remaining));
 
-        // --- 3. DISPLAY & BUZZER LOGIC ---
         if (id(display_toggle).state) {
-          // Night Dimming: Set intensity to 1 (22:00-07:00), else 15 (Max)
           if (now.hour >= 22 || now.hour < 7) {
             it.set_intensity(1); 
           } else {
             it.set_intensity(15);
           }
-          
-          // Show 8 digits with leading zeros (e.g. 00123456)
           it.printf("%08ld", seconds_remaining);
           
-          // Trigger melody exactly at midnight on Christmas Day
           if (seconds_remaining == 0 && !id(holiday_played)) {
             id(my_buzzer).play("JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e");
             id(holiday_played) = true;
           } 
-          
-          // Reset holiday flag once timer moves back to >10 seconds (new year)
           if (seconds_remaining > 10) {
             id(holiday_played) = false;
           }
         } else {
-          it.all_leds_off(); // Switch is OFF in Web UI
+          it.all_leds_off();
         }
       } else {
-        it.print("SET TIME"); // Waiting for WiFi/NTP Sync
+        it.print("SET TIME");
       }
