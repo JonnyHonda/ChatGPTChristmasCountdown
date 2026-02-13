@@ -4,18 +4,17 @@ esphome:
 esp8266:
   board: nodemcuv2
 
-# Web interface at http://192.168.1.128
 web_server:
   port: 80
 
 wifi:
   ssid: "YOUR_SSID"
   password: "YOUR_PASSWORD"
-  # Optional: Fixed IP setup if your router doesn't reserve it
-  manual_ip:
-    static_ip: 192.168.1.128
-    gateway: 192.168.1.1
-    subnet: 255.255.255.0
+  fast_connect: true
+
+# 1. Built-in LED shows connection status
+status_led:
+  pin: GPIO2 # Built-in LED on most ESP8266 boards
 
 time:
   - platform: sntp
@@ -41,7 +40,6 @@ globals:
     type: bool
     initial_value: 'false'
 
-# Control buttons for the Web Interface
 button:
   - platform: template
     name: "Play Jingle Bells"
@@ -120,7 +118,6 @@ display:
         }
 
         if (id(display_toggle).state) {
-          // Automatic BST Night Dimming
           if (now.hour >= 22 || now.hour < 7) {
             it.set_intensity(1); 
           } else {
