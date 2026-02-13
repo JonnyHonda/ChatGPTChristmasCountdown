@@ -84,6 +84,7 @@ switch:
     id: display_toggle
     optimistic: true
     restore_mode: ALWAYS_ON
+    
   - platform: template
     name: "Test Mode (100x Speed)"
     id: test_mode
@@ -136,6 +137,13 @@ display:
 
         long seconds_remaining = target_epoch - current_epoch;
         id(seconds_left).publish_state(to_string(seconds_remaining));
-        it.printf("%08ld", seconds_remaining);
+        if (id(display_toggle).state) {
+          if (now.hour >= 22 || now.hour < 7) {
+            it.set_intensity(1); 
+          } else {
+            it.set_intensity(15);
+          }
+           it.printf("%08ld", seconds_remaining);
+          } 
         }
 
