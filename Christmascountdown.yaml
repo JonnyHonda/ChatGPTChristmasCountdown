@@ -112,7 +112,7 @@ spi:
   mosi_pin: GPIO13
 
 display:
-  - platform: max7219_7segment
+  - platform: max7219
     id: my_display
     cs_pin: GPIO15
     num_chips: 1
