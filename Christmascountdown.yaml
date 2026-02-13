@@ -1,17 +1,34 @@
 esphome:
-  name: christmas-countdown
+  name: countdowner
+  friendly_name: CountDowner
 
 esp8266:
   board: nodemcuv2
 
-web_server:
-  port: 80
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+# api:
+#   encryption:
+#     key: "YPtluhKvx5lOPq3uYO4huMizLiZNXU3N5s7g1vk6woA="
+
+ota:
+  - platform: esphome
+    password: "4684c4d0cca45e993aa891fea83ae2cc"
 
 wifi:
-  ssid: "YOUR_SSID"
-  password: "YOUR_PASSWORD"
-  fast_connect: true
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: 192.168.1.95
+  fast_connect: True
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Countdowner Fallback Hotspot"
+    password: "5ZvfscdxmTVM"
 
+captive_portal:
 # Signal sensor to monitor connection quality in the Web UI
 sensor:
   - platform: wifi_signal
@@ -20,7 +37,7 @@ sensor:
 
 output:
   - platform: esp8266_pwm
-    pin: GPIO12
+    pin: D1
     id: buzzer_out
   - platform: gpio
     pin:
@@ -33,32 +50,12 @@ globals:
   - id: last_blink
     type: uint32_t
     initial_value: '0'
-
-# Connectivity Monitoring Logic
-interval:
-  - interval: 100ms # High-frequency check to handle fast blinking
-    then:
-      lambda: |-
-        bool wifi_connected = wifi::global_wifi_component->is_connected();
-        bool ntp_synced = id(sntp_time).now().is_valid();
-        uint32_t now_ms = millis();
-
-        if (!wifi_connected) {
-          // FAST BLINK (No WiFi): Toggle every 200ms
-          if (now_ms - id(last_blink) >= 200) {
-            id(onboard_led).toggle();
-            id(last_blink) = now_ms;
-          }
-        } else if (!ntp_synced) {
-          // SLOW BLINK (No NTP): Toggle every 800ms
-          if (now_ms - id(last_blink) >= 800) {
-            id(onboard_led).toggle();
-            id(last_blink) = now_ms;
-          }
-        } else {
-          // SYSTEM HEALTHY: LED OFF
-          id(onboard_led).turn_off();
-        }
+  - id: fake_time_offset
+    type: long
+    initial_value: '0'
+  - id: holiday_played
+    type: bool
+    initial_value: 'false'
 
 time:
   - platform: sntp
@@ -70,14 +67,6 @@ time:
 rtttl:
   output: buzzer_out
   id: my_buzzer
-
-globals:
-  - id: fake_time_offset
-    type: long
-    initial_value: '0'
-  - id: holiday_played
-    type: bool
-    initial_value: 'false'
 
 button:
   - platform: template
@@ -107,20 +96,23 @@ text_sensor:
     name: "Seconds to Christmas"
     id: seconds_left
 
+web_server:
+  port: 80
+  version: 3
+  ota: false    
+  log: False
+
 spi:
-  clk_pin: GPIO14
-  mosi_pin: GPIO13
+  clk_pin: D7
+  mosi_pin: D8
 
 display:
   - platform: max7219
-    id: my_display
-    cs_pin: GPIO15
+    cs_pin: D6
     num_chips: 1
-    update_interval: 1s
     lambda: |-
       auto now = id(sntp_time).now();
-      
-      if (now.is_valid()) {
+       if (now.is_valid()) {
         if (id(test_mode).state) {
           id(fake_time_offset) += 3600; 
         }
@@ -144,25 +136,6 @@ display:
 
         long seconds_remaining = target_epoch - current_epoch;
         id(seconds_left).publish_state(to_string(seconds_remaining));
-
-        if (id(display_toggle).state) {
-          if (now.hour >= 22 || now.hour < 7) {
-            it.set_intensity(1); 
-          } else {
-            it.set_intensity(15);
-          }
-          it.printf("%08ld", seconds_remaining);
-          
-          if (seconds_remaining == 0 && !id(holiday_played)) {
-            id(my_buzzer).play("JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e");
-            id(holiday_played) = true;
-          } 
-          if (seconds_remaining > 10) {
-            id(holiday_played) = false;
-          }
-        } else {
-          it.all_leds_off();
+        it.printf("%08ld", seconds_remaining);
         }
-      } else {
-        it.print("SET TIME");
-      }
+
