@@ -1,0 +1,120 @@
+esphome:
+  name: christmas-countdown
+
+esp8266:
+  board: nodemcuv2
+
+web_server:
+  port: 80
+
+wifi:
+  ssid: "YOUR_SSID"
+  password: "YOUR_PASSWORD"
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "GMT0BST,M3.5.0/1,M10.5.0"
+    servers:
+      - 0.uk.pool.ntp.org
+
+# 1. Add PWM Output for the Buzzer
+output:
+  - platform: esp8266_pwm
+    pin: GPIO12
+    id: buzzer_out
+
+# 2. Add RTTTL Component with Jingle Bells string
+rtttl:
+  output: buzzer_out
+  id: my_buzzer
+
+globals:
+  - id: fake_time_offset
+    type: long
+    initial_value: '0'
+  - id: holiday_played
+    type: bool
+    initial_value: 'false'
+
+switch:
+  - platform: template
+    name: "Display Power"
+    id: display_toggle
+    optimistic: true
+    restore_mode: ALWAYS_ON
+
+  - platform: template
+    name: "Test Mode (100x Speed)"
+    id: test_mode
+    optimistic: true
+    on_turn_off:
+      lambda: 'id(fake_time_offset) = 0;'
+
+text_sensor:
+  - platform: template
+    name: "Seconds to Christmas"
+    id: seconds_left
+
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO13
+
+display:
+  - platform: max7219_7segment
+    id: my_display
+    cs_pin: GPIO15
+    num_chips: 1
+    update_interval: 1s
+    lambda: |-
+      auto now = id(sntp_time).now();
+      
+      if (now.is_valid()) {
+        if (id(test_mode).state) {
+          id(fake_time_offset) += 3600; 
+        }
+        
+        time_t current_epoch = now.timestamp + id(fake_time_offset);
+        struct tm target;
+        gmtime_r(&current_epoch, &target);
+        target.tm_mon = 11;
+        target.tm_mday = 25;
+        target.tm_hour = 0;
+        target.tm_min = 0;
+        target.tm_sec = 0;
+        target.tm_isdst = -1;
+        
+        time_t target_epoch = mktime(&target);
+        
+        if (current_epoch > target_epoch) {
+          target.tm_year += 1;
+          target_epoch = mktime(&target);
+        }
+
+        long seconds_remaining = target_epoch - current_epoch;
+        id(seconds_left).publish_state(to_string(seconds_remaining));
+
+        // --- BUZZER TRIGGER ---
+        // If countdown hits 0 and we haven't played yet
+        if (seconds_remaining == 0 && !id(holiday_played)) {
+          id(my_buzzer).play("JingleBells:d=8,o=5,b=125:4e,4e,2e,4e,4e,2e,4e,4g,4c,4d,1e");
+          id(holiday_played) = true;
+        } 
+        // Reset the "played" flag once we are 10 seconds past the target
+        if (seconds_remaining > 10) {
+          id(holiday_played) = false;
+        }
+
+        if (id(display_toggle).state) {
+          if (now.hour >= 22 || now.hour < 7) {
+            it.set_intensity(1); 
+          } else {
+            it.set_intensity(15);
+          }
+          it.printf("%08ld", seconds_remaining);
+        } else {
+          it.all_leds_off();
+        }
+      } else {
+        it.print("SET TIME");
+      }
